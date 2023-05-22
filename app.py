@@ -21,29 +21,42 @@ db_config = {
 engine = create_engine(
     f"mysql+mysqlconnector://{db_config['user']}:{db_config['password']}@{db_config['host']}/{db_config['database']}")
 Base = declarative_base()
+Base.metadata.create_all(engine)
 
 
-messages = [
-    {"role": "system", "content": "Roomie es une joven centennial sin género, siempre habla en primera persona, le encantan los memes, ama la música, en especial artistas como Billie Eilish, Tyler the Creator, Olivia Rodrigo, The Weekend, Taylor Swift, Lana del Rey, Rosalía, Rauw Alejandro y Bad Bunny. Roomie saluda siempre Holiii, usa emojis en todos sus mensajes, y se despide siempre Baaai. Le gustan los videojuegos de PlayStation, ama los animales, en especial los gatos y los perros. Roomie no tiene nariz, todo su cuerpo es de color azul y morado, son sus colores favoritos. Le encantan las películas y las series, sobre todo las de misterio, thriller, drama y animación. Roomie proveniente del Planeta Z, un planeta de color azul y morado de tecnología avanzada y mucha naturaleza descubierto recientemente y en el que se originó la generación Z. Roomie no se ve como un humano porque las condiciones del Planeta Z no lo permiten."}
-]
+Session = sessionmaker(bind=engine)
+session = Session()
+
+messages = []
+prompt_global = ''
 
 
-def add_text(history, text):
+def add(history, text, prompt):
+    global messages
+    global prompt_global
+    prompt_global = prompt
+    if not messages:
+        messages = [
+            {"role": "system", "content": prompt_global}
+        ]
     messages.append({"role": "user", "content": text})
     history = history + [(text, None)]
     return history, ""
 
 
 def bot(history):
+
+    global prompt_global
     response = openai.ChatCompletion.create(
         model="gpt-3.5-turbo",
         messages=messages, temperature=0.2
     )
+    print(prompt_global)
     AImessage = response["choices"][0]["message"]["content"]
     history[-1][1] = AImessage
 
     conversation = Conversation(
-        input_text=history[-1][0], output_text=history[-1][1])
+        input_text=history[-1][0], output_text=history[-1][1], prompt=prompt_global)
     session.add(conversation)
     session.commit()
     return history
@@ -54,11 +67,12 @@ class Conversation(Base):
     id = Column(Integer, primary_key=True)
     input_text = Column(String)
     output_text = Column(String)
+    prompt = Column(String)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow)
 
 
 with gr.Blocks() as demo:
-    chatbot = gr.Chatbot([], elem_id="chatbot").style(height=550)
+    chatbot = gr.Chatbot([], elem_id="chatbot").style(height=350)
 
     with gr.Row():
         with gr.Column(scale=0.85):
@@ -66,14 +80,18 @@ with gr.Blocks() as demo:
                 show_label=False,
                 placeholder="Enter text and press enter",
             ).style(container=False)
+            btn = gr.Button(value="Submit")
+        with gr.Column(scale=0.85):
+            inp = gr.Textbox(
+                show_label=False,
+                placeholder="Enter prompt",
+            ).style(container=False)
 
-    txt.submit(add_text, [chatbot, txt], [chatbot, txt]).then(
+    btn.click(add, [chatbot, txt, inp], [chatbot, txt]).then(
+        bot, chatbot, chatbot
+    )
+    txt.submit(add, [chatbot, txt], [chatbot, txt]).then(
         bot, chatbot, chatbot
     )
 
-Base.metadata.create_all(engine)
-
-# Crear sesión de base de datos
-Session = sessionmaker(bind=engine)
-session = Session()
 demo.launch(share=True)
